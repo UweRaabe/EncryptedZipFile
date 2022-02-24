@@ -122,6 +122,11 @@ type
     function Write(const Buffer; Count: Integer): Integer; override;
   end;
 
+  TExtZCompressionStream = class(TZCompressionStream)
+  protected
+    function GetSize: Int64; override;
+  end;
+
   TEncryptedZCompressionStream = class(TMemoryStream)
   private
     FPassword: string;
@@ -415,7 +420,7 @@ begin
   ZipHeader.CRC32 := crc32(0, Memory, Size);
   encryptStream := TEncryptStream.Create(Target, Password, ZipHeader^);
   try
-    compressionStream := TZCompressionStream.Create(encryptStream, zcDefault, -15);
+    compressionStream := TExtZCompressionStream.Create(encryptStream, zcDefault, -15);
     try
       compressionStream.CopyFrom(Self, 0);
     finally
@@ -425,6 +430,11 @@ begin
     encryptStream.Free;
     ZipHeader.CRC32 := 0;
   end;
+end;
+
+function TExtZCompressionStream.GetSize: Int64;
+begin
+  Result := -1;
 end;
 
 end.
