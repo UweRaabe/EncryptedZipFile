@@ -246,7 +246,11 @@ procedure TDecryptStream.InitHeader;
 var
   header: array [0..11] of Byte;
 begin
+{$IF CompilerVersion < 35.0 Delphi 11 Alexandria }
   FStreamSize := ZipHeader.CompressedSize - Sizeof(header);
+{$ELSE}
+  FStreamSize := ZipHeader.CompressedSize64 - Sizeof(header);
+{$ENDIF}
   ReadBuffer(header, Sizeof(header));
   if header[High(header)] <> (ZipHeader.CRC32 shr 24) then
     raise EZipInvalidPassword.Create(SInvalidPassword);
