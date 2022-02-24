@@ -432,7 +432,9 @@ begin
     end;
   finally
     encryptStream.Free;
+  {$IF CompilerVersion < 35.0 Delphi 11 Alexandria }
     ZipHeader.CRC32 := 0;
+  {$ENDIF}
   end;
 end;
 
