@@ -72,7 +72,7 @@ type
       $B3667A2E, $C4614AB8, $5D681B02, $2A6F2B94, $B40BBE37, $C30C8EA1, $5A05DF1B, $2D02EF8D);
 
   private
-    FKey: array [0 .. 2] of Int64;
+    FKey: array [0 .. 2] of UInt64;
   protected
     function CalcDecryptByte: Byte;
     function UpdateCRC32(Key: longword; Value: Byte): longword;
@@ -350,7 +350,7 @@ end;
 
 function TCryptor.CalcDecryptByte: Byte;
 var
-  temp: int64;
+  temp: UInt64;
 begin
   temp   := FKey[2] or 2;
   Result := word(temp * (temp xor 1)) shr 8;
