@@ -233,9 +233,9 @@ end;
 
 function TCryptStream.Seek(const Offset: Int64; Origin: TSeekOrigin): Int64;
 begin
-  if (offset = 0) and (origin = soCurrent) then
+  if (Offset = 0) and (Origin = soCurrent) then
   begin
-    result := FStream.Position;
+    Result := FStream.Position;
   end
   else begin
     raise EZipInvalidOperation.Create(SInvalidOp);
@@ -261,7 +261,7 @@ var
   P: PByte;
   I: Integer;
 begin
-  result := FStream.Read(Buffer, Count);
+  Result := FStream.Read(Buffer, Count);
   P := @Buffer;
   for I := 1 to result do begin
     FCryptor.DecryptByte(P^);
@@ -275,7 +275,7 @@ var
   newPos: Int64;
 begin
   curPos := FStream.Position;
-  newPos := CurPos;
+  newPos := curPos;
   case Origin of
     soBeginning: newPos := Offset;
     soCurrent: newPos := curPos + Offset;
@@ -283,10 +283,10 @@ begin
   end;
   if newPos < curPos then begin
     ResetStream;
-    result := Skip(newPos);
+    Result := Skip(newPos);
   end
   else begin
-    result := Skip(newPos - curPos);
+    Result := Skip(newPos - curPos);
   end;
 end;
 
@@ -294,18 +294,18 @@ function TDecryptStream.Skip(Value: Int64): Int64;
 const
   MaxBufSize = $F000;
 var
-  buffer: TBytes;
+  Buffer: TBytes;
   cnt: Integer;
 begin
   if Value < MaxBufSize then
-    SetLength(buffer, Value)
+    SetLength(Buffer, Value)
   else
-    SetLength(buffer, MaxBufSize);
+    SetLength(Buffer, MaxBufSize);
   while Value > 0 do begin
-    cnt := Length(buffer);
+    cnt := Length(Buffer);
     if Value < cnt then
       cnt := Value;
-    ReadBuffer(buffer, cnt);
+    ReadBuffer(Buffer, cnt);
     Value := Value - cnt;
   end;
   Result := FStream.Position;
@@ -332,7 +332,7 @@ var
   I: Integer;
   P: PByte;
 begin
-  result := 0;
+  Result := 0;
   if Count < MaxBufSize then
     SetLength(bytes, Count)
   else
@@ -347,7 +347,7 @@ begin
     for I := 0 to cnt - 1 do begin
       FCryptor.EncryptByte(bytes[I]);
     end;
-    result := result + FStream.Write(bytes, cnt);
+    Result := Result + FStream.Write(bytes, cnt);
     Count := Count - cnt;
   end;
 end;
@@ -356,7 +356,7 @@ function TCryptor.CalcDecryptByte: Byte;
 var
   temp: UInt64;
 begin
-  temp   := FKey[2] or 2;
+  temp := FKey[2] or 2;
   Result := word(temp * (temp xor 1)) shr 8;
 end;
 
@@ -421,7 +421,7 @@ var
   encryptStream: TStream;
 begin
   ZipHeader.Flag := ZipHeader.Flag or 1;
-  ZipHeader.CRC32 := crc32(0, Memory, Size);
+  ZipHeader.CRC32 := CRC32(0, Memory, Size);
   encryptStream := TEncryptStream.Create(Target, Password, ZipHeader^);
   try
     compressionStream := TExtZCompressionStream.Create(encryptStream, zcDefault, -15);
