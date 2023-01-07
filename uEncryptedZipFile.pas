@@ -26,7 +26,7 @@ type
 implementation
 
 uses
-  System.SysUtils, System.ZLib;
+  System.SysUtils, System.ZLib, System.RTLConsts;
 
 resourcestring
   SInvalidPassword = 'invalid password';
@@ -127,7 +127,7 @@ type
     function GetSize: Int64; override;
   end;
 
-  TEncryptedZCompressionStream = class(TMemoryStream)
+  TEncryptedStream = class(TMemoryStream)
   private
     FPassword: string;
     FTarget: TStream;
@@ -142,16 +142,151 @@ type
     property Target: TStream read FTarget;
   end;
 
+{$IF not Declared(RTLVersion111) }
+type
+  TZDecompressionStreamExt = TZDecompressionStream;
+{$IFEND}
+
+{$IF not Declared(RTLVersion112) }
+type
+  /// <summary> Helper class for reading a segment of another stream.</summary>
+  TProxySubrangeStream = class(TStream)
+  private
+    FOffset: Int64;
+    FStream: TStream;
+    FSize: Int64;
+  protected
+    function GetSize: Int64; override;
+  public
+    constructor Create(Stream: TStream; Offset, Size: Int64);
+    function Read(var Buffer; Count: Longint): Longint; overload; override;
+    function Seek(const Offset: Int64; Origin: TSeekOrigin): Int64; override;
+    function Write(const Buffer; Count: Longint): Longint; overload; override;
+  end;
+
+{ TProxySubrangeStream }
+
+constructor TProxySubrangeStream.Create(Stream: TStream; Offset, Size: Int64);
+begin
+  inherited Create;
+  if Stream = nil then
+    raise EArgumentNilException.CreateRes(@SArgumentNil);
+  if Offset >= 0 then
+  begin
+    if Offset + Size > Stream.Size then
+      raise EArgumentOutOfRangeException.CreateRes(@sArgumentOutOfRange_OffSizeInvalid);
+    if Offset <> Stream.Position then
+      Stream.Seek(Offset, soBeginning);
+  end;
+  FStream := Stream;
+  FOffset := Offset;
+  FSize := Size;
+end;
+
+function TProxySubrangeStream.GetSize: Int64;
+begin
+  if FOffset <> -1 then
+    Result := FSize
+  else
+    Result := FStream.Size;
+end;
+
+function TProxySubrangeStream.Read(var Buffer; Count: Longint): Longint;
+begin
+  if FOffset <> -1 then
+  begin
+    if FStream.Position + Count > FOffset + FSize then
+      Count := FOffset + FSize - FStream.Position;
+    if Count <= 0 then
+      Exit(0);
+  end;
+  Result := FStream.Read(Buffer, Count);
+end;
+
+function TProxySubrangeStream.Seek(const Offset: Int64; Origin: TSeekOrigin): Int64;
+var
+  LOff: Int64;
+begin
+  if FOffset <> -1 then
+  begin
+    LOff := Offset;
+    case Origin of
+      soBeginning:
+        begin
+          if LOff > FSize then
+            LOff := FSize
+          else if LOff < 0 then
+            LOff := 0;
+          Inc(LOff, FOffset);
+        end;
+      soCurrent:
+        begin
+          if FStream.Position + LOff > FOffset + FSize then
+            LOff := FOffset + FSize - FStream.Position
+          else if FStream.Position + LOff < FOffset then
+            LOff := FOffset - FStream.Position;
+        end;
+      soEnd:
+        begin
+          if -LOff > FSize then
+            LOff := -FSize
+          else if LOff > 0 then
+            LOff := 0;
+          Dec(LOff, FStream.Size - (FOffset + FSize));
+        end;
+    end;
+    Result := FStream.Seek(LOff, Origin) - FOffset;
+  end
+  else
+    Result := FStream.Seek(Offset, Origin);
+end;
+
+function TProxySubrangeStream.Write(const Buffer; Count: Longint): Longint;
+begin
+  if FOffset <> -1 then
+  begin
+    if FStream.Position + Count > FOffset + FSize then
+      Count := FOffset + FSize - FStream.Position;
+    if Count <= 0 then
+      Exit(0);
+  end;
+  Result := FStream.Write(Buffer, Count)
+end;
+{$IFEND}
+
 class constructor TEncryptedZipFile.Create;
 begin
+  RegisterCompressionHandler(zcStored,
+    function(InStream: TStream; const ZipFile: TZipFile; const Item: TZipHeader): TStream
+    begin
+      if HasPassword(ZipFile) then
+        Result := TEncryptedStream.Create(InStream, TEncryptedZipFile(ZipFile).Password, Item)
+      else
+        Result := TProxySubrangeStream.Create(InStream, -1, -1);
+    end,
+    function(InStream: TStream; const ZipFile: TZipFile; const Item: TZipHeader): TStream
+    var
+      LIsEncrypted: Boolean;
+    begin
+      // From https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
+      // Section 4.4.4 general purpose bit flag: (2 bytes)
+      // Bit 0: If set, indicates that the file is encrypted.
+      LIsEncrypted := (Item.Flag and 1) = 1;
+
+      if LIsEncrypted and (ZipFile is TEncryptedZipFile) then
+        Result := TDecryptStream.Create(InStream, TEncryptedZipFile(ZipFile).Password, Item)
+      else
+        Result := TProxySubrangeStream.Create(InStream, InStream.Position, Item.UncompressedSize64);
+    end);
+
   RegisterCompressionHandler(zcDeflate,
     function(InStream: TStream; const ZipFile: TZipFile; const Item: TZipHeader): TStream
     begin
       if HasPassword(ZipFile) then begin
-        Result := TEncryptedZCompressionStream.Create(InStream, TEncryptedZipFile(ZipFile).Password, Item);
+        Result := TEncryptedStream.Create(InStream, TEncryptedZipFile(ZipFile).Password, Item);
       end
       else begin
-        Result := TZCompressionStream.Create(InStream, zcDefault, -15);
+        Result := TZCompressionStreamExt.Create(InStream, zcDefault, -15);
       end;
     end,
     function(InStream: TStream; const ZipFile: TZipFile; const Item: TZipHeader): TStream
@@ -172,7 +307,7 @@ begin
         LStream := TDecryptStream.Create(InStream, TEncryptedZipFile(ZipFile).Password, Item)
       else
         LStream := InStream;
-      Result := TZDecompressionStream.Create(LStream, -15, LStream <> InStream);
+      Result := TZDecompressionStreamExt.Create(LStream, -15, LStream <> InStream);
     end);
 end;
 
@@ -401,7 +536,7 @@ begin
   FKey[2] := UpdateCRC32(FKey[2], Byte(FKey[1] shr 24));
 end;
 
-constructor TEncryptedZCompressionStream.Create(ATarget: TStream; const APassword: string; const AZipHeader: TZipHeader);
+constructor TEncryptedStream.Create(ATarget: TStream; const APassword: string; const AZipHeader: TZipHeader);
 begin
   inherited Create;
   FTarget := ATarget;
@@ -409,13 +544,13 @@ begin
   FPassword := APassword;
 end;
 
-destructor TEncryptedZCompressionStream.Destroy;
+destructor TEncryptedStream.Destroy;
 begin
   EncryptToTarget;
   inherited;
 end;
 
-procedure TEncryptedZCompressionStream.EncryptToTarget;
+procedure TEncryptedStream.EncryptToTarget;
 var
   compressionStream: TStream;
   encryptStream: TStream;
@@ -424,11 +559,18 @@ begin
   ZipHeader.CRC32 := CRC32(0, Memory, Size);
   encryptStream := TEncryptStream.Create(Target, Password, ZipHeader^);
   try
-    compressionStream := TExtZCompressionStream.Create(encryptStream, zcDefault, -15);
-    try
-      compressionStream.CopyFrom(Self, 0);
-    finally
-      compressionStream.Free;
+    case TZipCompression(ZipHeader.CompressionMethod) of
+      zcStored: begin
+        encryptStream.CopyFrom(Self, 0);
+      end;
+      zcDeflate: begin
+        compressionStream := TExtZCompressionStream.Create(encryptStream, zcDefault, -15);
+        try
+          compressionStream.CopyFrom(Self, 0);
+        finally
+          compressionStream.Free;
+        end;
+      end;
     end;
   finally
     encryptStream.Free;
